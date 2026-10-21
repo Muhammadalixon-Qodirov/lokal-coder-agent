@@ -1,0 +1,29 @@
+[project]
+name = "coder"
+version = "0.0.1"
+description = "Lokal coder agent"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx",
+    "typer",
+    "rich",
+    "pyyaml",
+    "tree-sitter",
+    "tree-sitter-language-pack",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+agent = "coder.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["coder*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,261 @@
+# Edit benchmark: agent vazifani bajaradi, keyin YASHIRIN testlar bilan tekshiriladi.
+# Agent o'z tekshiruvida faqat repo'dagi ko'rinadigan testlarni ishlatadi (real hayotdagidek).
+
+- id: py-discount-bounds
+  fixture: shop
+  task: "`apply_discount` da xato bor: chegirma foizi 0 dan kichik yoki 100 dan katta bo'lsa ham qabul qilinyapti. Bunday holatda ValueError chiqarsin."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    import pytest
+    from shop.services import ShopService
+
+    def _svc():
+        s = ShopService(); s.add_product("Choy", 12000, stock=10); s.create_customer("Ali", "a@b.uz"); return s
+
+    def test_discount_bounds():
+        s = _svc(); o = s.create_order(1, [(1, 1)])
+        for bad in (-5, 101, 150):
+            with pytest.raises(ValueError):
+                s.apply_discount(o.id, bad)
+        s.apply_discount(o.id, 100); assert o.total == 0
+        s.apply_discount(o.id, 0); assert o.total == 12000
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-format-som
+  fixture: shop
+  task: "money.py dagi `format_som` minglarni bo'sh joy bilan ajratsin: 1250000 → \"1 250 000 so'm\". Manfiy summa uchun minus saqlansin: -5000 → \"-5 000 so'm\"."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    from shop.money import format_som
+
+    def test_format():
+        assert format_som(0) == "0 so'm"
+        assert format_som(999) == "999 so'm"
+        assert format_som(1000) == "1 000 so'm"
+        assert format_som(1250000) == "1 250 000 so'm"
+        assert format_som(-5000) == "-5 000 so'm"
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-product-search
+  fixture: shop
+  task: "ProductRepository ga `search(query: str)` metodini qo'sh: nomida query uchraydigan mahsulotlarni qaytarsin, katta-kichik harf farqi hisobga olinmasin. Bo'sh query bo'lsa bo'sh ro'yxat qaytsin."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    from shop.services import ShopService
+
+    def test_search():
+        s = ShopService()
+        s.add_product("Ko'k choy", 12000); s.add_product("Qora CHOY", 15000); s.add_product("Non", 4000)
+        assert sorted(p.name for p in s.products.search("choy")) == ["Ko'k choy", "Qora CHOY"]
+        assert [p.name for p in s.products.search("NON")] == ["Non"]
+        assert s.products.search("") == []
+        assert s.products.search("qahva") == []
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-cancel-order
+  fixture: shop
+  task: "Buyurtmani bekor qilish: ShopService ga `cancel_order(order_id)` qo'sh. Faqat `new` statusdagi buyurtma bekor qilinadi (status `cancelled` bo'ladi) va mahsulotlar soni (stock) omborga qaytariladi. Buyurtma topilmasa yoki statusi boshqa bo'lsa ValueError."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    import pytest
+    from shop.services import ShopService
+
+    def _svc():
+        s = ShopService(); s.add_product("Choy", 12000, stock=10); s.add_product("Non", 4000, stock=5)
+        s.create_customer("Ali", "a@b.uz"); return s
+
+    def test_cancel_returns_stock():
+        s = _svc(); o = s.create_order(1, [(1, 3), (2, 2)])
+        s.cancel_order(o.id)
+        assert o.status == "cancelled"
+        assert s.products.get(1).stock == 10 and s.products.get(2).stock == 5
+
+    def test_cancel_errors():
+        s = _svc(); o = s.create_order(1, [(1, 1)])
+        s.pay_order(o.id)
+        with pytest.raises(ValueError):
+            s.cancel_order(o.id)
+        with pytest.raises(ValueError):
+            s.cancel_order(999)
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-email-validation
+  fixture: shop
+  task: "Validate the customer email in create_customer: it must contain exactly one '@', a non-empty part before it, and a domain with a dot after it; otherwise raise ValueError('invalid email'). Store the email lowercased."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    import pytest
+    from shop.services import ShopService
+
+    def test_email():
+        s = ShopService()
+        c = s.create_customer("Ali", "  Ali@Example.COM ")
+        assert c.email == "ali@example.com"
+        for bad in ("ali", "@example.com", "ali@example", "a@b@c.com", "ali@com"):
+            with pytest.raises(ValueError, match="invalid email"):
+                s.create_customer("X", bad)
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-api-get-product
+  fixture: shop
+  task: "Add an API endpoint GET /products/{product_id} that returns 200 with the product dict, or 404 with {'error': 'product not found'}."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    from shop.api import App
+
+    def test_get_product():
+        app = App()
+        app.handle("POST", "/products", {"name": "Choy", "price": 12000, "stock": 3})
+        status, body = app.handle("GET", "/products/1")
+        assert status == 200 and body == {"id": 1, "name": "Choy", "price": 12000, "stock": 3}
+        assert app.handle("GET", "/products/7") == (404, {"error": "product not found"})
+        assert app.handle("GET", "/products")[0] == 200
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-order-created-at
+  fixture: shop
+  task: "Order modeliga `created_at` maydonini qo'sh (standart qiymat — hozirgi UTC vaqt, timezone-aware datetime). `Order.to_dict()` uni ISO 8601 formatda `created_at` kaliti bilan qaytarsin."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    from datetime import datetime, timezone
+    from shop.models import Order
+
+    def test_created_at():
+        o = Order(1, 1)
+        assert o.created_at.tzinfo is not None
+        assert abs((datetime.now(timezone.utc) - o.created_at).total_seconds()) < 5
+        d = o.to_dict()
+        assert d["created_at"] == o.created_at.isoformat()
+        assert datetime.fromisoformat(d["created_at"]) == o.created_at
+        assert Order(2, 1).created_at >= o.created_at
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: py-customer-orders-api
+  fixture: shop
+  task: "Add GET /customers/{customer_id}/orders endpoint that returns 200 with {'items': [order dicts]} for that customer, or 404 with {'error': 'customer not found'} if the customer does not exist."
+  hidden_file: tests/test_hidden.py
+  hidden: |
+    from shop.api import App
+
+    def test_customer_orders():
+        app = App(); s = app.service
+        s.add_product("Choy", 12000, stock=10)
+        s.create_customer("Ali", "a@b.uz"); s.create_customer("Vali", "v@b.uz")
+        s.create_order(1, [(1, 1)]); s.create_order(2, [(1, 2)]); s.create_order(1, [(1, 3)])
+        status, body = app.handle("GET", "/customers/1/orders")
+        assert status == 200 and [o["id"] for o in body["items"]] == [1, 3]
+        assert app.handle("GET", "/customers/9/orders") == (404, {"error": "customer not found"})
+  test: pytest -q tests/test_hidden.py tests/test_services.py
+
+- id: go-note-tags
+  fixture: notes
+  task: "Note ga `Tags []string` maydonini qo'sh (JSON'da `tags`). POST /notes so'rovida `tags` qabul qilinsin va saqlansin. Tags berilmasa JSON'da `null` emas, bo'sh massiv `[]` chiqsin."
+  hidden_file: hidden_test.go
+  hidden: |
+    package notes
+
+    import (
+    	"strings"
+    	"testing"
+    )
+
+    func TestHiddenTags(t *testing.T) {
+    	srv := NewServer(NewStore())
+    	do(t, srv, "POST", "/notes", `{"title":"a","tags":["x","y"]}`)
+    	do(t, srv, "POST", "/notes", `{"title":"b"}`)
+    	if b := do(t, srv, "GET", "/notes/1", "").Body.String(); !strings.Contains(b, `"tags":["x","y"]`) {
+    		t.Fatalf("tags: %s", b)
+    	}
+    	if b := do(t, srv, "GET", "/notes/2", "").Body.String(); !strings.Contains(b, `"tags":[]`) {
+    		t.Fatalf("empty tags: %s", b)
+    	}
+    }
+  test: go test ./...
+
+- id: go-list-sorted
+  fixture: notes
+  task: "GET /notes ro'yxati yangi qaydlar birinchi bo'ladigan tartibda (CreatedAt bo'yicha kamayish) qaytsin. CreatedAt teng bo'lsa ID kattasi birinchi."
+  hidden_file: hidden_test.go
+  hidden: |
+    package notes
+
+    import (
+    	"testing"
+    	"time"
+    )
+
+    func TestHiddenSorted(t *testing.T) {
+    	s := NewStore()
+    	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+    	times := []time.Time{base, base.Add(time.Hour), base.Add(time.Hour), base.Add(-time.Hour)}
+    	i := 0
+    	s.now = func() time.Time { t := times[i]; i++; return t }
+    	for range times {
+    		s.Create("t", "")
+    	}
+    	got := []int{}
+    	for _, n := range s.List() {
+    		got = append(got, n.ID)
+    	}
+    	want := []int{3, 2, 1, 4}
+    	for k := range want {
+    		if len(got) != len(want) || got[k] != want[k] {
+    			t.Fatalf("got %v want %v", got, want)
+    		}
+    	}
+    }
+  test: go test ./...
+
+- id: go-delete-note
+  fixture: notes
+  task: "Add DELETE /notes/{id}: respond 204 No Content when the note was deleted, 404 with {\"error\":\"not found\"} if it does not exist, and 400 {\"error\":\"invalid id\"} for a non-numeric id."
+  hidden_file: hidden_test.go
+  hidden: |
+    package notes
+
+    import "testing"
+
+    func TestHiddenDelete(t *testing.T) {
+    	srv := NewServer(NewStore())
+    	do(t, srv, "POST", "/notes", `{"title":"a"}`)
+    	if c := do(t, srv, "DELETE", "/notes/1", "").Code; c != 204 {
+    		t.Fatalf("delete: %d", c)
+    	}
+    	if c := do(t, srv, "GET", "/notes/1", "").Code; c != 404 {
+    		t.Fatalf("after delete: %d", c)
+    	}
+    	if r := do(t, srv, "DELETE", "/notes/1", ""); r.Code != 404 {
+    		t.Fatalf("missing: %d", r.Code)
+    	}
+    	if c := do(t, srv, "DELETE", "/notes/abc", "").Code; c != 400 {
+    		t.Fatalf("invalid: %d", c)
+    	}
+    }
+  test: go test ./...
+
+- id: go-title-required
+  fixture: notes
+  task: "POST /notes da title bo'sh yoki faqat bo'sh joylardan iborat bo'lsa 400 qaytarilsin, javob {\"error\":\"title required\"}. Title boshidagi va oxiridagi bo'sh joylar olib tashlanib saqlansin."
+  hidden_file: hidden_test.go
+  hidden: |
+    package notes
+
+    import (
+    	"strings"
+    	"testing"
+    )
+
+    func TestHiddenTitle(t *testing.T) {
+    	srv := NewServer(NewStore())
+    	for _, body := range []string{`{"title":""}`, `{"title":"   "}`, `{}`} {
+    		r := do(t, srv, "POST", "/notes", body)
+    		if r.Code != 400 || !strings.Contains(r.Body.String(), `"error":"title required"`) {
+    			t.Fatalf("%s → %d %s", body, r.Code, r.Body)
+    		}
+    	}
+    	r := do(t, srv, "POST", "/notes", `{"title":"  salom  "}`)
+    	if r.Code != 201 || !strings.Contains(r.Body.String(), `"title":"salom"`) {
+    		t.Fatalf("trim: %d %s", r.Code, r.Body)
+    	}
+    }
+  test: go test ./...

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+models/
+*.gguf
+.agent/
+bench/results/*.json
+.pytest_cache/
+
+# xususiy repolar tarixidan yig'ilgan vazifalar — public repo'ga kirmaydi
+bench/tasks/context/
